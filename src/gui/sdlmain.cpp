@@ -733,6 +733,7 @@ bool setSizeButNotResize() {
 }
 
 Bitu time_limit_ms = 0;
+int capture_at_frame = -1;
 
 #if !defined(OSFREE)
 extern bool keep_umb_on_boot;
@@ -7426,6 +7427,7 @@ bool DOSBOX_parse_argv() {
             fprintf(stderr,"  -set <section property=value>           Set the config option (overriding the config file).\n");
             fprintf(stderr,"                                          Make sure to surround the string in quotes to cover spaces.\n");
             fprintf(stderr,"  -time-limit <n>                         Kill the emulator after 'n' seconds\n");
+            fprintf(stderr,"  -capture-at-frame <n>                   Take a screenshot at frame 'n'\n");
             fprintf(stderr,"  -fastlaunch                             Fast launch mode (skip the BIOS logo and welcome banner)\n");
 #if C_DEBUG
             fprintf(stderr,"  -helpdebug                              Show debug-related options\n");
@@ -7490,6 +7492,10 @@ bool DOSBOX_parse_argv() {
         else if (optname == "time-limit") {
             if (!control->cmdline->NextOptArgv(tmp)) return false;
             control->opt_time_limit = atof(tmp.c_str());
+        }
+        else if (optname == "capture-at-frame") {
+            if (!control->cmdline->NextOptArgv(tmp)) return false;
+            control->opt_capture_at_frame = atoi(tmp.c_str());
         }
         else if (optname == "break-start") {
             control->opt_break_start = true;
@@ -8353,6 +8359,9 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
 
     if (control->opt_time_limit > 0)
         time_limit_ms = (Bitu)(control->opt_time_limit * 1000);
+
+    if (control->opt_capture_at_frame >= 0)
+        capture_at_frame = control->opt_capture_at_frame;
 
     if (control->opt_console)
         DOSBox_ShowConsole();

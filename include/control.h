@@ -71,6 +71,7 @@ public:
     std::vector<std::string> opt_set;
 
     double opt_time_limit = -1;
+    int opt_capture_at_frame = -1;
     signed char opt_promptfolder = -1;
     bool opt_disable_dpi_awareness = false;
     bool opt_disable_numlock_check = false;

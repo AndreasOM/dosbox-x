@@ -488,6 +488,17 @@ void RENDER_EndUpdate( bool abort ) {
         GFX_EndUpdate(nullptr);
     }
     else {
+        {
+            extern int capture_at_frame;
+            if (capture_at_frame >= 0 && !abort) {
+                if (capture_at_frame == 0) {
+                    CaptureState |= CAPTURE_IMAGE;
+                    capture_at_frame = -1;
+                } else {
+                    capture_at_frame--;
+                }
+            }
+        }
         if (GCC_UNLIKELY(CaptureState & (CAPTURE_IMAGE|CAPTURE_VIDEO))) {
             Bitu pitch, flags;
             flags = 0;
