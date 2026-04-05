@@ -30,6 +30,7 @@ enum SCREEN_TYPES {
 #if defined(MACOSX) && defined(C_SDL2) && C_METAL
     , SCREEN_METAL
 #endif
+    , SCREEN_NONE
 };
 
 enum AUTOLOCK_FEEDBACK

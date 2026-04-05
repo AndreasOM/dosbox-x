@@ -185,6 +185,7 @@ char* revert_escape_newlines(const char* aMessage);
 #include <output/output_direct3d11.h>
 #include <output/output_direct3d.h>
 #include <output/output_opengl.h>
+#include <output/output_none.h>
 #include <output/output_surface.h>
 #include <output/output_tools.h>
 #include <output/output_ttf.h>
@@ -734,6 +735,7 @@ bool setSizeButNotResize() {
 
 Bitu time_limit_ms = 0;
 int capture_at_frame = -1;
+bool sdl_headless = false;
 
 #if !defined(OSFREE)
 extern bool keep_umb_on_boot;
@@ -892,11 +894,12 @@ void UpdateWindowDimensions(void)
 {
 #if defined(C_SDL2)
     int w = 640,h = 480;
-    SDL_GetWindowSize(sdl.window, &w, &h);
+    if (sdl.window) {
+        SDL_GetWindowSize(sdl.window, &w, &h);
+        Uint32 fl = SDL_GetWindowFlags(sdl.window);
+        UpdateWindowMaximized((fl & SDL_WINDOW_MAXIMIZED) != 0);
+    }
     UpdateWindowDimensions(w,h);
-
-    Uint32 fl = SDL_GetWindowFlags(sdl.window);
-    UpdateWindowMaximized((fl & SDL_WINDOW_MAXIMIZED) != 0);
 #endif
 #if defined(MACOSX)
     macosx_GetWindowDPI(/*&*/screen_size_info);
@@ -1075,7 +1078,7 @@ static void DOSBox_SetOriginalIcon(void) {
 #endif
 
 #if defined(C_SDL2)
-        SDL_SetWindowIcon(sdl.window, logos);
+        if (sdl.window) SDL_SetWindowIcon(sdl.window, logos);
 #else
         SDL_WM_SetIcon(logos,NULL);
 #endif
@@ -1179,7 +1182,7 @@ void GFX_SetTitle(int32_t cycles, int frameskip, Bits timing, bool paused) {
     if (IsDebuggerActive()) strcat(title," DEBUGGER");
 #endif
 #if defined(C_SDL2)
-    SDL_SetWindowTitle(sdl.window,title);
+    if (sdl.window) SDL_SetWindowTitle(sdl.window,title);
 #else
     SDL_WM_SetCaption(title,VERSION);
 #endif
@@ -1429,9 +1432,9 @@ void BlankDisplay(void) {
         LOG_MSG("FIXME: BlankDisplay() not implemented for OpenGL mode");
     }
     else {
-        SDL_FillRect(sdl.surface, nullptr, 0);
+        if (sdl.surface) SDL_FillRect(sdl.surface, nullptr, 0);
 #if defined(C_SDL2)
-        SDL_UpdateWindowSurface(sdl.window);
+        if (sdl.window) SDL_UpdateWindowSurface(sdl.window);
 #else
         SDL_Flip(sdl.surface);
 #endif
@@ -1474,11 +1477,11 @@ void GFX_SDL_Overscan(void) {
                     }
                 }
             } else {
-                for (Bitu i=0; i<4; i++)
+                if (sdl.surface) for (Bitu i=0; i<4; i++)
                     SDL_FillRect(sdl.surface, &sdl.updateRects[i], (Uint32)border_color);
 
 #if defined(C_SDL2)
-                SDL_UpdateWindowSurfaceRects(sdl.window, sdl.updateRects, 4);
+                if (sdl.window) SDL_UpdateWindowSurfaceRects(sdl.window, sdl.updateRects, 4);
 #else
                 SDL_UpdateRects(sdl.surface, 4, sdl.updateRects);
 #endif
@@ -1782,6 +1785,7 @@ SDL_Window* GFX_GetSDLWindow(void) {
 
 SDL_Window* GFX_SetSDLWindowMode(uint16_t width, uint16_t height, SCREEN_TYPES screenType)
 {
+    if (sdl_headless) return sdl.window;
     static SCREEN_TYPES lastType = SCREEN_SURFACE;
     if (sdl.renderer) {
         SDL_DestroyRenderer(sdl.renderer);
@@ -1980,6 +1984,10 @@ Bitu GFX_GetBestMode(Bitu flags)
 
     switch (sdl.desktop.want_type)
     {
+        case SCREEN_NONE:
+            retFlags = OUTPUT_NONE_GetBestMode(flags);
+            break;
+
         case SCREEN_SURFACE:
             retFlags = OUTPUT_SURFACE_GetBestMode(flags);
             break;
@@ -2064,7 +2072,7 @@ void GFX_ResetScreen(void) {
             SDL_Rect *rect = &sdl.updateRects[0];
             rect->x = 0; rect->y = 0; rect->w = 0; rect->h = 0;
 #if defined(C_SDL2)
-            SDL_UpdateWindowSurfaceRects(sdl.window, sdl.updateRects, 4);
+            if (sdl.window) SDL_UpdateWindowSurfaceRects(sdl.window, sdl.updateRects, 4);
 #else
             SDL_UpdateRects(sdl.surface, 4, sdl.updateRects);
 #endif
@@ -2249,6 +2257,10 @@ Bitu GFX_SetSize(Bitu width, Bitu height, Bitu flags, double scalex, double scal
     }
 
     switch (sdl.desktop.want_type) {
+        case SCREEN_NONE:
+            retFlags = OUTPUT_NONE_SetSize();
+            break;
+
         case SCREEN_SURFACE:
             retFlags = OUTPUT_SURFACE_SetSize();
             break;
@@ -3234,6 +3246,9 @@ bool GFX_StartUpdate(uint8_t* &pixels,Bitu &pitch)
 
     switch (sdl.desktop.type)
     {
+        case SCREEN_NONE:
+            return OUTPUT_NONE_StartUpdate(pixels, pitch);
+
         case SCREEN_SURFACE:
             return OUTPUT_SURFACE_StartUpdate(pixels, pitch);
 
@@ -3335,6 +3350,10 @@ void GFX_EndUpdate(const uint16_t *changedLines) {
 switch_type:
     switch (sdl.desktop.type)
     {
+        case SCREEN_NONE:
+            OUTPUT_NONE_EndUpdate(changedLines);
+            break;
+
         case SCREEN_SURFACE:
             OUTPUT_SURFACE_EndUpdate(changedLines);
             break;
@@ -4213,6 +4232,11 @@ static void GUI_StartUp() {
         init_output = true;
     }
 #endif
+    else if (output == "none")
+    {
+        OUTPUT_NONE_Select();
+        init_output = true;
+    }
     else
     {
         LOG_MSG("SDL: Unsupported output device %s, switching back to surface",output.c_str());
@@ -4290,6 +4314,7 @@ static void GUI_StartUp() {
 
 /* Initialize screen for first time */
 #if defined(C_SDL2)
+  if (!sdl_headless) {
     if (!initgl) {
         GFX_SetResizeable(true);
         if (!GFX_SetSDLSurfaceWindow(640,400))
@@ -4302,9 +4327,16 @@ static void GUI_StartUp() {
     sdl.desktop.bpp=8*SDL_BYTESPERPIXEL(sdl.desktop.pixelFormat);
     if (SDL_BITSPERPIXEL(sdl.desktop.pixelFormat) == 24)
         LOG_MSG("SDL: You are running in 24 bpp mode, this will slow down things!");
+  } else {
+    sdl.desktop.bpp = 32;
+  }
 #else
     if (!initgl) {
-        sdl.surface=SDL_SetVideoMode(640,400,0,SDL_RESIZABLE);
+        if (sdl_headless) {
+            sdl.surface=SDL_SetVideoMode(1,1,32,SDL_SWSURFACE|SDL_NOFRAME);
+        } else {
+            sdl.surface=SDL_SetVideoMode(640,400,0,SDL_RESIZABLE);
+        }
         if (sdl.surface == NULL) E_Exit("Could not initialize video: %s",SDL_GetError());
     }
     sdl.deferred_resize = false;
@@ -4323,8 +4355,8 @@ static void GUI_StartUp() {
 #endif
 
 #if defined(C_SDL2)
-    SDL_SetWindowTitle(sdl.window,"DOSBox-X");
-    if (posx >= 0 && posy >= 0) {
+    if (sdl.window) SDL_SetWindowTitle(sdl.window,"DOSBox-X");
+    if (sdl.window && posx >= 0 && posy >= 0) {
 #if WIN32
         HWND hwnd = GetHWND();
         HMONITOR monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
@@ -4880,7 +4912,7 @@ static void HandleMouseMotion(SDL_MouseMotionEvent * motion) {
 #if DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW /* SDL drawn menus */
 void MenuFullScreenRedraw(void) {
 #if defined(C_SDL2)
-    SDL_UpdateWindowSurface(sdl.window);
+    if (sdl.window) SDL_UpdateWindowSurface(sdl.window);
 #else
     SDL_Flip(sdl.surface);
 #endif
@@ -5058,7 +5090,7 @@ static void HandleMouseButton(SDL_MouseButtonEvent * button, SDL_MouseMotionEven
                     uprect.w = mainMenu.menuBox.w;
                     uprect.h = DOSBoxMenu::dropshadowY;
 #if defined(C_SDL2)
-                    SDL_UpdateWindowSurfaceRects(sdl.window, &uprect, 1);
+                    if (sdl.window) SDL_UpdateWindowSurfaceRects(sdl.window, &uprect, 1);
 #else
                     SDL_UpdateRects( sdl.surface, 1, &uprect );
 #endif
@@ -6833,6 +6865,7 @@ void SDL_SetupConfigSection() {
 #if defined(MACOSX) && defined(C_SDL2) && C_METAL
         "metal",
 #endif
+        "none",
         nullptr };
 
     Pint = sdl_sec->Add_int("display", Property::Changeable::Always, 0);
@@ -7428,6 +7461,7 @@ bool DOSBOX_parse_argv() {
             fprintf(stderr,"                                          Make sure to surround the string in quotes to cover spaces.\n");
             fprintf(stderr,"  -time-limit <n>                         Kill the emulator after 'n' seconds\n");
             fprintf(stderr,"  -capture-at-frame <n>                   Take a screenshot at frame 'n'\n");
+            fprintf(stderr,"  -headless                                Run without a window or audio\n");
             fprintf(stderr,"  -fastlaunch                             Fast launch mode (skip the BIOS logo and welcome banner)\n");
 #if C_DEBUG
             fprintf(stderr,"  -helpdebug                              Show debug-related options\n");
@@ -7496,6 +7530,9 @@ bool DOSBOX_parse_argv() {
         else if (optname == "capture-at-frame") {
             if (!control->cmdline->NextOptArgv(tmp)) return false;
             control->opt_capture_at_frame = atoi(tmp.c_str());
+        }
+        else if (optname == "headless") {
+            control->opt_headless = true;
         }
         else if (optname == "break-start") {
             control->opt_break_start = true;
@@ -8363,6 +8400,9 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
     if (control->opt_capture_at_frame >= 0)
         capture_at_frame = control->opt_capture_at_frame;
 
+    if (control->opt_headless)
+        sdl_headless = true;
+
     if (control->opt_console)
         DOSBox_ShowConsole();
 
@@ -9170,6 +9210,14 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
 			if (!change_success&&!value.empty()) LOG_MSG("Cannot set \"%s\"\n", inputline.c_str());
 		}
 
+    /* -- headless mode: force output=none and nosound */
+    if (sdl_headless) {
+        Section_prop* sdl_sec = static_cast<Section_prop*>(control->GetSection("sdl"));
+        if (sdl_sec) sdl_sec->HandleInputline("output=none");
+        Section_prop* mixer_sec = static_cast<Section_prop*>(control->GetSection("mixer"));
+        if (mixer_sec) mixer_sec->HandleInputline("nosound=true");
+    }
+
     {
         Section_prop *section = static_cast<Section_prop *>(control->GetSection("dosbox"));
         workdiropt = section->Get_string("working directory option");
@@ -9433,10 +9481,15 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
 	LOG_MSG("Prevent capture: %u",preventcap);
 
         /* -- SDL init */
-        if (SDL_Init(SDL_INIT_AUDIO|SDL_INIT_VIDEO|SDL_INIT_TIMER|SDL_INIT_NOPARACHUTE) >= 0)
-            sdl.inited = true;
-        else
-            E_Exit("Can't init SDL %s",SDL_GetError());
+        {
+            Uint32 sdl_flags = SDL_INIT_VIDEO|SDL_INIT_TIMER|SDL_INIT_NOPARACHUTE;
+            if (!sdl_headless)
+                sdl_flags |= SDL_INIT_AUDIO;
+            if (SDL_Init(sdl_flags) >= 0)
+                sdl.inited = true;
+            else
+                E_Exit("Can't init SDL %s",SDL_GetError());
+        }
 #if defined(C_SDL2)
         SDL_version sdl_version;
         SDL_GetVersion(&sdl_version);

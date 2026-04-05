@@ -112,6 +112,7 @@ public:
     bool opt_debug = false;
     bool opt_nogui = false;
     bool opt_nolog = false;
+    bool opt_headless = false;
     bool opt_exit = false;
     bool opt_test = false;
 };
